@@ -3,14 +3,20 @@
 
 Usage:
   wanna upload PATH [--no-encrypt] [--no-progress] [--ignore-prefix]
-                    [--checksum] [--datacenter=<aws>] [--bucket=<credentials>] [-v | -vv]
+                    [--checksum] [--datacenter=<aws>] [--bucket=<credentials>] [-v | -vv] [-H | --human]
+                    [--profile=<name>]
   wanna download PATH [DST] [--no-decrypt] [--no-progress] [--checksum]
-                            [--datacenter=<aws>]  [--bucket=<credentials>] [--ignore-prefix] [-v | -vv]
+                            [--datacenter=<aws>]  [--bucket=<credentials>] [--ignore-prefix] [-v | -vv] [-H | --human]
+                            [--profile=<name>]
   wanna delete PATH [--ignore-prefix] [--datacenter=<aws>]  [--bucket=<credentials>] [-v | -vv]
+                    [--profile=<name>]
   wanna search TERM [--ignore-prefix] [--datacenter=<aws>]  [--bucket=<credentials>] [-v | -vv]
+                    [--profile=<name>]
   wanna rename OLD NEW [--ignore-prefix] [--datacenter=<aws>] [--no-encrypt]  [--bucket=<credentials>] [-v | -vv]
-  wanna status PATH [--ignore-prefix] [--datacenter=<aws>]  [--bucket=<credentials>] [-v | -vv]
-  wanna ls [--ignore-prefix] [--datacenter=<aws>]  [--bucket=<credentials>] [-v | -vv]
+                       [--profile=<name>]
+  wanna status PATH [--ignore-prefix] [--datacenter=<aws>]  [--bucket=<credentials>] [-v | -vv] [--profile=<name>]
+  wanna generate_secret [-v | -vv]
+  wanna ls [--ignore-prefix] [--datacenter=<aws>]  [--bucket=<credentials>] [-v | -vv] [-H | --human] [--profile=<name>]
   wanna (-h | --help)
   wanna --version
 
@@ -22,6 +28,7 @@ Options:
   --no-encrypt   Do not encrypt at rest.
   --no-decrypt   Do not decrypt in transit.
   --ignore-prefix  Ignore all prefixes
+  --profile=<name>  Use a named profile [default: aws]
   --datacenter=<name>  Cloud provider [default: aws]
   --bucket=<name>  Bucket name [default: credentials]
 """
@@ -36,54 +43,66 @@ from wanna.misc import rename_file
 from wanna.misc import search_files
 from wanna import __version__ as version
 
+from wanna.utils import humanize
+
+import os
 import sys
 import random
 import logging
+import binascii
 
-LOG = logging.getLogger('wanna:cli')
+LOG = logging.getLogger("wanna:cli")
 
 
 def _handle(args):
-    if args['PATH'] is not None:
-        path = args['PATH']
-        if args['upload'] or args['download']:
-            add_checksum = args['--checksum']
-            use_encryption = not (args['--no-encrypt'] or args['--no-decrypt'])
-            progress = not (args['--no-progress'])
-            if args['download']:
-                dst = args['DST']
-    if args['rename']:
-        use_encryption = not (args['--no-encrypt'] or args['--no-decrypt'])
-        old = args['OLD']
-        new = args['NEW']
-    if args['search']:
-        term = args['TERM']
-    vendor = args['--datacenter']
-    ignore_prefix = args['--ignore-prefix']
-    bucket = None if args['--bucket'] == 'credentials' else args['--bucket']
+    if args["PATH"] is not None:
+        path = args["PATH"]
+        if args["upload"] or args["download"]:
+            add_checksum = args["--checksum"]
+            use_encryption = not (args["--no-encrypt"] or args["--no-decrypt"])
+            progress = not (args["--no-progress"])
+            if args["download"]:
+                dst = args["DST"]
+    if args["rename"]:
+        use_encryption = not (args["--no-encrypt"] or args["--no-decrypt"])
+        old = args["OLD"]
+        new = args["NEW"]
+    if args["search"]:
+        term = args["TERM"]
+    vendor = args["--datacenter"]
+    ignore_prefix = args["--ignore-prefix"]
+
+    profile = args["--profile"] if args["--profile"] else None
+    bucket = None if args["--bucket"] == "credentials" else args["--bucket"]
+    humanized = any((args["-H"], args["--human"]))
+
     args = locals()
-    args.pop('args')
+    args.pop("args")
     LOG.debug(args)
     return args
 
 
 def handle_upload(args):
     kwargs = _handle(args)
-    LOG.info('Uploading {path}...to {vendor}'.format(**kwargs))
+    LOG.info("Uploading {path}...to {vendor}".format(**kwargs))
     upload_files(**kwargs)
-    print('Upload finished!')
+    print("Upload finished!")
 
 
 def handle_ls(args):
     kwargs = _handle(args)
     for el in list_files(**kwargs):
-        print('{}\t {}\t\t {}'.format(el['date'].isoformat(), el['size'], el['name']))
+
+        reported_size = humanize(el["size"]) if kwargs["humanized"] else el["size"]
+        print(
+            "{}\t {}\t\t {}".format(el["date"].isoformat(), reported_size, el["name"])
+        )
 
 
 def handle_rename(args):
     kwargs = _handle(args)
     rename_file(**kwargs)
-    print('Done!')
+    print("Done!")
 
 
 def handle_search(args):
@@ -92,74 +111,84 @@ def handle_search(args):
         print(el)
 
 
+def handle_secret(args):
+    print(binascii.b2a_hex(os.urandom(32)))
+
+
 def handle_download(args):
     kwargs = _handle(args)
-    LOG.info('Getting {path}...'.format(**kwargs))
+    LOG.info("Getting {path}...".format(**kwargs))
     download_file(**kwargs)
-    print('Download finished!')
+    print("Download finished!")
 
 
 def handle_delete(args):
     kwargs = _handle(args)
-    LOG.info('Deleting {path}...'.format(**kwargs))
+    LOG.info("Deleting {path}...".format(**kwargs))
     delete_file(**kwargs)
-    print('Done!')
+    print("Done!")
 
 
 def handle_status(args):
     kwargs = _handle(args)
     resp = get_status(**kwargs)
-    if 'TagSet' in resp:
-        for item in resp['TagSet']:
+    if "TagSet" in resp:
+        for item in resp["TagSet"]:
             for key, value in item.items():
-                if item[key] == 'state':
-                    print('import_status: {}'.format(item['Value']))
+                if item[key] == "state":
+                    print("import_status: {}".format(item["Value"]))
                     return
         else:
-            print('import_status: init')
+            print("import_status: init")
 
 
 def handle_cry():
     from pygments.console import codes
-    code = 'Hahahah, you wanna cry...'
-    print(''.join(random.choice(codes.values()) + x + codes['reset'] for x in code))
+
+    code = "Hahahah, you wanna cry..."
+    print(
+        "".join(random.choice(list(codes.values())) + x + codes["reset"] for x in code)
+    )
     sys.exit()
 
 
 def main():
-    if 'cry' in sys.argv:
+    if "cry" in sys.argv:
         handle_cry()
 
     args = docopt(__doc__, version=version)
 
-    if args['--verbose'] > 1:
+    if args["--verbose"] > 1:
         logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
-    elif args['--verbose'] == 1:
+    elif args["--verbose"] == 1:
         logging.basicConfig(stream=sys.stderr, level=logging.INFO)
     else:
         logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
-    if args['upload'] is True:
+    if args["upload"] is True:
         handle_upload(args)
 
-    if args['download'] is True:
+    if args["download"] is True:
         handle_download(args)
 
-    if args['delete'] is True:
+    if args["delete"] is True:
         handle_delete(args)
 
-    if args['ls'] is True:
+    if args["ls"] is True:
         handle_ls(args)
 
-    if args['search'] is True:
+    if args["search"] is True:
         handle_search(args)
 
-    if args['rename'] is True:
+    if args["rename"] is True:
         handle_rename(args)
 
-    if args['status'] is True:
+    if args["status"] is True:
         handle_status(args)
 
+    if args["generate_secret"] is True:
+        handle_secret(args)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
